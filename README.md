@@ -1,7 +1,7 @@
-# عملائك — شركة سعد مفرح الشمراني
+# دفتر العملاء — شركة سعد مفرح الشمراني
 
 قاعدة بيانات العملاء (سوشيال ميديا ومكتب) وإرسال الإعلانات على واتساب بأمان: التطبيق بيجهز الصورة والكلام لكل عميل، وانت بتضغط إرسال.
 
-- الموقع: https://alshomrani-co.github.io/umalaek/
-- تطبيق الأندرويد: من Actions ← Android APK ← Run workflow، وبعدها من Releases.
-- قواعد Firebase: ملف `firestore.rules` (نفس قواعد البصمة + قواعد عملائك) — الصقها كلها في Firebase ← Firestore ← Rules.
+- الموقع: https://alshomrani-co.github.io/clientbook/
+- Firebase: مشروع clientbook (منفصل عن البصمة). القواعد في `firestore.rules`.
+- تطبيق الأندرويد: `.github/workflows/android.yml` ← Actions ← Android APK ← Run workflow، والملف في Releases.

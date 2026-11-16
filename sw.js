@@ -1,6 +1,6 @@
-// عملائك — كاش بسيط: الشبكة الأول، ولو مفيش نت يفتح من الكاش
-const V = 'umalaek-v1';
-const CORE = ['./', './index.html', './app.js?v=1', './config.js?v=1', './manifest.json', './logo-192.png', './logo-512.png', './logo-full.png'];
+// دفتر العملاء — كاش بسيط: الشبكة الأول، ولو مفيش نت يفتح من الكاش
+const V = 'clientbook-v2';
+const CORE = ['./', './index.html', './app.js?v=2', './config.js?v=2', './manifest.json', './logo-192.png', './logo-512.png', './logo-full.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(CORE)).catch(() => {})); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

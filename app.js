@@ -1,4 +1,4 @@
-import { firebaseConfig, OWNER_UID, EMAIL_DOMAIN } from './config.js?v=1';
+import { firebaseConfig, EMAIL_DOMAIN } from './config.js?v=2';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, onSnapshot, collection, query, where, serverTimestamp, writeBatch, deleteField } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
@@ -9,7 +9,7 @@ let auth;
 try { auth = initializeAuth(fbApp, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] }); } catch (e) { auth = getAuth(fbApp); }
 let db;
 try { db = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); } catch (e) { db = initializeFirestore(fbApp, {}); }
-const C = { clients: 'uk_clients', camps: 'uk_campaigns', sent: 'uk_sent', users: 'uk_users', set: 'uk_settings' };
+const C = { clients: 'clients', camps: 'campaigns', sent: 'sent', users: 'users', set: 'settings', meta: 'meta' };
 
 /* ========== helpers ========== */
 const $ = (s, r = document) => r.querySelector(s);
@@ -53,6 +53,7 @@ const fmtDate = s => { if (!s) return ''; const [y, m, d] = s.split('-'); return
 const fmtTs = t => { const ms = tsMs(t); if (!ms) return ''; const d = new Date(ms + RIYADH); return `${d.getUTCDate()}/${d.getUTCMonth() + 1} — ${((d.getUTCHours() + 11) % 12) + 1}:${String(d.getUTCMinutes()).padStart(2, '0')} ${d.getUTCHours() < 12 ? 'ص' : 'م'}`; };
 const firstName = n => String(n || '').trim().split(/\s+/)[0] || '';
 const initials = n => { const p = String(n || '').trim().split(/\s+/); return (p[0]?.[0] || '؟') + (p[1]?.[0] || ''); };
+const APP = 'دفتر العملاء';
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } };
 const native = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
@@ -81,9 +82,9 @@ const I = {
 
 /* ========== state ========== */
 const S = {
-  user: null, role: null, myName: '', view: lsGet('uk.view', 'home'),
+  user: null, role: null, myName: '', view: lsGet('cb.view', 'home'),
   clients: {}, camps: {}, users: {}, set: { types: [], plats: [], waPkg: 'auto' },
-  sec: lsGet('uk.sec', 'social'), q: '', f: { type: '', status: '', plat: '', ok: '' },
+  sec: lsGet('cb.sec', 'social'), q: '', f: { type: '', status: '', plat: '', ok: '' },
   unsub: [], ready: false,
 };
 const DEF_TYPES = ['رخصة بناء', 'تصميم معماري', 'تصميم إنشائي', 'إشراف هندسي', 'رفع مساحي', 'دفاع مدني وسلامة', 'إلكتروميكانيك', 'تصميم 3D وواجهات', 'ترميم وتعديل', 'استشارة'];
@@ -100,7 +101,7 @@ const plats = () => (S.set.plats && S.set.plats.length ? S.set.plats : DEF_PLATS
 
 /* ========== theme ========== */
 function applyTheme() {
-  const t = lsGet('uk.theme', '');
+  const t = lsGet('cb.theme', '');
   const dark = t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = dark ? '#141416' : '#f4f2ee';
@@ -132,16 +133,16 @@ function confirmBox(title, body, okText, danger = true, extra = '') {
   });
 }
 
-/* ========== login ========== */
+/* ========== login / first setup ========== */
+async function ownerExists() { try { const d = await getDoc(doc(db, C.meta, 'owner')); return d.exists(); } catch (e) { return true; } }
 function renderLogin(msg = '') {
   $('#app').innerHTML = `<div class="login"><form class="card" id="lf" novalidate>
     <img src="logo-192.png" alt="">
-    <div><h1>عملائك</h1><p class="muted" style="text-align:center;margin:4px 0 0">شركة سعد مفرح الشمراني للاستشارات الهندسية</p></div>
+    <div><h1>${APP}</h1><p class="muted" style="text-align:center;margin:4px 0 0">شركة سعد مفرح الشمراني للاستشارات الهندسية</p></div>
     <label class="f">اسم المستخدم<input id="lu" autocomplete="username" required></label>
     <label class="f">كلمة السر<input id="lp" type="password" autocomplete="current-password" required></label>
     <div class="err" id="le">${esc(msg)}</div>
     <button class="btn red block" id="lb">دخول</button>
-    <p class="muted" style="font-size:13px;text-align:center;margin:0">ادخل بنفس اسم المستخدم وكلمة السر بتوع تطبيق البصمة، أو الحساب اللي المدير عملهولك.</p>
   </form></div>`;
   $('#lf').onsubmit = async e => {
     e.preventDefault(); const u = $('#lu').value.trim(), p = $('#lp').value;
@@ -149,22 +150,48 @@ function renderLogin(msg = '') {
     $('#lb').disabled = true; $('#le').textContent = '';
     try { await signInWithEmailAndPassword(auth, toEmail(u), p); } catch (er) { $('#le').textContent = authMsg(er); $('#lb').disabled = false; }
   };
+  ownerExists().then(ex => { if (!ex && !S.user) renderSetup(); });
+}
+function renderSetup() {
+  $('#app').innerHTML = `<div class="login"><form class="card" id="sf" novalidate>
+    <img src="logo-192.png" alt="">
+    <div><h1>${APP}</h1><p class="muted" style="text-align:center;margin:4px 0 0">أول مرة تفتح التطبيق: اعمل حساب المالك</p></div>
+    <div class="okbox">الحساب ده هيبقى المالك وليه كل الصلاحيات. بعد كده محدش يقدر يدخل غير بحساب انت تعمله من الإعدادات.</div>
+    <label class="f">اسمك<input id="su0" autocomplete="name" required placeholder="مثلاً: سعد الشمراني"></label>
+    <label class="f">اسم المستخدم<input id="su" autocomplete="username" required placeholder="حروف إنجليزي أو عربي وأرقام"></label>
+    <label class="f">كلمة السر (٦ حروف أو أرقام على الأقل)<input id="sp" type="password" autocomplete="new-password" required></label>
+    <label class="f">اكتب كلمة السر تاني<input id="sp2" type="password" autocomplete="new-password" required></label>
+    <div class="err" id="se"></div>
+    <button class="btn red block" id="sb">إنشاء حساب المالك</button>
+  </form></div>`;
+  $('#sf').onsubmit = async e => {
+    e.preventDefault(); const name = $('#su0').value.trim(), u = $('#su').value.trim(), p = $('#sp').value, er = $('#se');
+    if (!name) { er.textContent = 'اكتب اسمك'; return; }
+    if (!USER_OK.test(normUser(u))) { er.textContent = 'اسم المستخدم من ٢ لـ ٢٤ حرف: عربي أو إنجليزي وأرقام بس'; return; }
+    if (p.length < 6) { er.textContent = 'كلمة السر لازم تكون ٦ حروف أو أرقام على الأقل'; return; }
+    if (p !== $('#sp2').value) { er.textContent = 'كلمتين السر مش زي بعض'; return; }
+    $('#sb').disabled = true; er.textContent = '';
+    try {
+      S.settingUp = true;
+      const cr = await createUserWithEmailAndPassword(auth, toEmail(u), p);
+      await setDoc(doc(db, C.meta, 'owner'), { uid: cr.user.uid, name, user: normUser(u), at: serverTimestamp() });
+      await setDoc(doc(db, C.users, cr.user.uid), { name, user: normUser(u), role: 'owner', active: true, created: serverTimestamp() });
+      S.settingUp = false; boot(cr.user);
+    } catch (x) { S.settingUp = false; er.textContent = String(x.code || '').includes('permission') ? 'فيه مالك متسجل قبل كده. ادخل بحسابه.' : authMsg(x); $('#sb').disabled = false; try { if (auth.currentUser) await signOut(auth); } catch (y) { } }
+  };
 }
 
 /* ========== boot ========== */
-onAuthStateChanged(auth, async u => {
+onAuthStateChanged(auth, u => { if (S.settingUp) return; boot(u); });
+async function boot(u) {
   S.unsub.forEach(f => f()); S.unsub = []; S.ready = false;
   if (!u) { S.user = null; renderLogin(); return; }
   S.user = u;
-  if (u.uid === OWNER_UID) { S.role = 'owner'; S.myName = 'الإدارة'; }
-  else {
-    let d = null; try { d = await getDoc(doc(db, C.users, u.uid)); } catch (e) { }
-    const v = d && d.exists() ? d.data() : null;
-    if (!v || v.active === false) { await signOut(auth); renderLogin('الحساب ده مش متضاف في «عملائك». اطلب من المدير يضيفك.'); return; }
-    S.role = v.role === 'sender' ? 'sender' : 'staff'; S.myName = v.name || '';
-  }
+  let v = null; try { const d = await getDoc(doc(db, C.users, u.uid)); v = d.exists() ? d.data() : null; } catch (e) { }
+  if (!v || v.active === false) { await signOut(auth); renderLogin('الحساب ده مش متضاف في «دفتر العملاء». اطلب من المدير يضيفك.'); return; }
+  S.role = v.role === 'owner' ? 'owner' : v.role === 'sender' ? 'sender' : 'staff'; S.myName = v.name || '';
   shell(); subscribe();
-});
+}
 
 function subscribe() {
   const err = e => { console.error(e); if (String(e && e.code).includes('permission')) toast('مفيش صلاحية لقراءة البيانات. حدّث قواعد Firebase', 5000); };
@@ -178,12 +205,12 @@ function subscribe() {
 const TABS = () => [['home', 'الرئيسية', I.home], ['clients', 'العملاء', I.users], ...(can.send() ? [['ads', 'الإعلانات', I.mega]] : []), ['follow', 'المتابعات', I.bell], ['set', 'الإعدادات', I.gear]];
 function shell() {
   if (!TABS().some(t => t[0] === S.view)) S.view = 'home';
-  $('#app').innerHTML = `<header class="top"><div class="wrap"><img src="logo-192.png" alt=""><div><h1>عملائك</h1><small>شركة الشمراني${S.myName ? ' — ' + esc(S.myName) : ''}</small></div><span class="sp"></span><button class="ib" id="thBtn" aria-label="تغيير المظهر">${I.moon}</button></div></header>
+  $('#app').innerHTML = `<header class="top"><div class="wrap"><img src="logo-192.png" alt=""><div><h1>${APP}</h1><small>شركة الشمراني${S.myName ? ' — ' + esc(S.myName) : ''}</small></div><span class="sp"></span><button class="ib" id="thBtn" aria-label="تغيير المظهر">${I.moon}</button></div></header>
   <main><div class="wrap" id="main"></div></main>
   <nav class="nav"><div class="wrap">${TABS().map(([k, l, ic]) => `<button data-tab="${k}" class="${S.view === k ? 'on' : ''}">${ic}<span>${l}</span><span class="dot" data-dot="${k}" hidden></span></button>`).join('')}</div></nav>
   <button class="fab" id="fab" aria-label="إضافة عميل">${I.plus}</button>`;
-  $$('.nav [data-tab]').forEach(b => b.onclick = () => { S.view = b.dataset.tab; lsSet('uk.view', S.view); $$('.nav [data-tab]').forEach(x => x.classList.toggle('on', x === b)); scrollTo(0, 0); render(); });
-  $('#thBtn').onclick = () => { lsSet('uk.theme', document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); applyTheme(); };
+  $$('.nav [data-tab]').forEach(b => b.onclick = () => { S.view = b.dataset.tab; lsSet('cb.view', S.view); $$('.nav [data-tab]').forEach(x => x.classList.toggle('on', x === b)); scrollTo(0, 0); render(); });
+  $('#thBtn').onclick = () => { lsSet('cb.theme', document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); applyTheme(); };
   $('#fab').onclick = () => clientForm();
   render();
 }
@@ -266,7 +293,7 @@ function vClients(m) {
    <div class="list">${list.length ? list.slice(0, 300).map(clientRow).join('') : `<div class="card empty"><b>${all.length ? 'مفيش نتايج' : 'لسه مفيش عملاء'}</b>${all.length ? 'غيّر البحث أو الفلاتر.' : 'اضغط زرار + عشان تضيف أول عميل.'}</div>`}</div>
    ${list.length > 300 ? `<p class="muted" style="text-align:center">بيظهر أول 300. استخدم البحث عشان توصل للباقي.</p>` : ''}
   </div>`;
-  $$('[data-sec]', m).forEach(b => b.onclick = () => { S.sec = b.dataset.sec; lsSet('uk.sec', S.sec); if (S.sec === 'office') S.f.plat = ''; render(); });
+  $$('[data-sec]', m).forEach(b => b.onclick = () => { S.sec = b.dataset.sec; lsSet('cb.sec', S.sec); if (S.sec === 'office') S.f.plat = ''; render(); });
   const q = $('#qIn', m); q.oninput = () => { S.q = q.value; clearTimeout(q._t); q._t = setTimeout(render, 180); };
   if (keepFocus) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
   [['fType', 'type'], ['fStatus', 'status'], ['fPlat', 'plat'], ['fOk', 'ok']].forEach(([id, k]) => { const s = $('#' + id, m); s && (s.onchange = () => { S.f[k] = s.value; render(); }); });
@@ -550,7 +577,7 @@ async function undoLast() {
   b.commit().catch(e => toast(authMsg(e), 5000));
   toast('رجع لقايمة الإرسال'); sendStep();
 }
-function stopSend() { sending.active = false; clearTimeout(sending.t); S.view = 'ads'; lsSet('uk.view', 'ads'); $$('.nav [data-tab]').forEach(x => x.classList.toggle('on', x.dataset.tab === 'ads')); render(); }
+function stopSend() { sending.active = false; clearTimeout(sending.t); S.view = 'ads'; lsSet('cb.view', 'ads'); $$('.nav [data-tab]').forEach(x => x.classList.toggle('on', x.dataset.tab === 'ads')); render(); }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && sending.active) sendStep(); });
 
 /* ========== settings ========== */
@@ -563,7 +590,7 @@ function vSet(m) {
     <div class="row"><label class="btn red grow" style="cursor:pointer">${I.up} استيراد من Excel<input type="file" id="xIn" accept=".xlsx,.xls,.csv" hidden></label>${can.del() ? `<button class="btn line grow" id="xOut">${I.down} تصدير كل العملاء</button>` : ''}</div></div>
    ${can.send() ? listEditor('أنواع المعاملات', 'types', types()) + listEditor('منصات السوشيال ميديا', 'plats', plats()) : ''}
    ${can.admin() ? usersCard() : ''}
-   <p class="muted" style="text-align:center;font-size:12.5px">عملائك — شركة سعد مفرح الشمراني للاستشارات الهندسية · إصدار 1</p>
+   <p class="muted" style="text-align:center;font-size:12.5px">${APP} — شركة سعد مفرح الشمراني للاستشارات الهندسية · إصدار 2</p>
   </div>`;
   $('#sOut', m).onclick = async () => { if (await confirmBox('تسجيل خروج؟', 'هتحتاج تدخل باسم المستخدم وكلمة السر تاني.', 'خروج', false)) signOut(auth); };
   $$('#sPkg button', m).forEach(b => b.onclick = () => setDoc(doc(db, C.set, 'main'), { waPkg: b.dataset.v }, { merge: true }).then(() => toast('اتحفظ')).catch(e => toast(authMsg(e))));
@@ -584,13 +611,13 @@ function bindListEditors(m) {
   });
 }
 function usersCard() {
-  const us = Object.values(S.users).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const us = Object.values(S.users).filter(u => u.role !== 'owner').sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   return `<div class="card"><h3>الموظفين اللي بيستخدموا التطبيق</h3>
    <div class="list" style="margin:10px 0">${us.length ? us.map(u => `<div class="cl"><div class="av of">${esc(initials(u.name))}</div><div class="grow"><div class="nm">${esc(u.name)}</div><div class="muted" style="font-size:13px">${esc(u.user || '')} — ${u.role === 'sender' ? 'يضيف ويبعت إعلانات' : 'يضيف ويعدل عملاء بس'}${u.active === false ? ' — موقوف' : ''}</div></div><div class="acts"><button data-utog="${esc(u.id)}" title="${u.active === false ? 'تفعيل' : 'إيقاف'}" aria-label="${u.active === false ? 'تفعيل' : 'إيقاف'}">${u.active === false ? '▶' : '⏸'}</button></div></div>`).join('') : '<p class="muted" style="margin:0">انت بس اللي بتستخدم التطبيق دلوقتي.</p>'}</div>
    <details><summary class="btn line block" style="list-style:none">${I.plus} إضافة موظف</summary>
     <div class="view" style="margin-top:10px"><div class="grid2"><label class="f">الاسم<input id="uName"></label><label class="f">اسم المستخدم<input id="uUser" autocomplete="off"></label></div>
     <div class="grid2"><label class="f">كلمة السر<input id="uPass" type="text" autocomplete="off"></label><label class="f">الصلاحية<select id="uRole"><option value="staff">يضيف ويعدل عملاء بس</option><option value="sender">يضيف عملاء ويبعت إعلانات</option></select></label></div>
-    <p class="muted" style="font-size:12.5px;margin:0">لو الموظف عنده حساب في البصمة، اكتب نفس اسم المستخدم بتاعه، وهو يدخل بنفس كلمة سره، والخانة دي هتتجاهل.</p>
+    
     <div class="err" id="uErr"></div><button class="btn red" id="uAdd">إضافة الموظف</button></div></details></div>`;
 }
 let secondary;
@@ -605,14 +632,8 @@ function bindUsers(m) {
     try {
       if (!secondary) { const a2 = initializeApp(firebaseConfig, 'secondary'); secondary = getAuth(a2); }
       let uid;
-      try { if (pass.length < 6) throw { code: 'weak-password' }; uid = (await createUserWithEmailAndPassword(secondary, toEmail(user), pass)).user.uid; }
-      catch (e) {
-        if (String(e.code).includes('email-already-in-use')) {
-          // حساب موجود من البصمة: نجيب الـ uid من الموظفين
-          let found = null; try { const s = await new Promise((res, rej) => { const u = onSnapshot(query(collection(db, 'employees'), where('num', '==', normUser(user))), x => { u(); res(x); }, rej); }); s.forEach(d => found = d.id); } catch (x) { }
-          if (!found) throw { code: 'email-already-in-use' }; uid = found;
-        } else throw e;
-      }
+      if (pass.length < 6) throw { code: 'weak-password' };
+      uid = (await createUserWithEmailAndPassword(secondary, toEmail(user), pass)).user.uid;
       try { await signOut(secondary); } catch (e) { }
       await setDoc(doc(db, C.users, uid), { name, user: normUser(user), role, active: true, created: serverTimestamp() });
       toast('اتضاف الموظف'); render();
@@ -672,7 +693,7 @@ async function exportExcel() {
   const rows = Object.values(S.clients).sort((a, b) => tsMs(b.createdAt) - tsMs(a.createdAt)).map(c => ({ 'الاسم': c.name, 'الجوال': '0' + (c.phone || '').slice(3), 'القسم': c.sec === 'office' ? 'المكتب' : 'سوشيال ميديا', 'المنصة': c.plat || '', 'نوع المعاملة': (c.types || []).join('، '), 'كان محتاج': c.need || '', 'الحالة': STATUS[c.status || 'new'], 'أول تواصل': c.first || '', 'المتابعة': c.follow || '', 'يستقبل إعلانات': c.ok === false ? 'لا' : 'نعم', 'ملاحظات': c.notes || '', 'آخر إعلان': c.lastDay || '' }));
   const ws = X.utils.json_to_sheet(rows); ws['!cols'] = [20, 14, 12, 12, 24, 40, 8, 12, 12, 10, 30, 12].map(w => ({ wch: w }));
   const wb = X.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] }; X.utils.book_append_sheet(wb, ws, 'العملاء');
-  X.writeFile(wb, `عملاء الشمراني ${dayKey()}.xlsx`);
+  X.writeFile(wb, `دفتر العملاء ${dayKey()}.xlsx`);
 }
 
 /* ========== service worker ========== */
